@@ -10,6 +10,7 @@ from sklearn.preprocessing import Imputer
 from sklearn.preprocessing import StandardScaler
 from sklearn.decomposition import PCA
 from datetime import datetime as dt
+from sklearn import preprocessing
 
 class PreProcessData:
 
@@ -27,6 +28,15 @@ class PreProcessData:
         else:
             labels = []
         return df, labels
+
+    @staticmethod
+    def numerically_encode_string_categoricals(df):
+        for i in df.columns:
+            if df[i].dtype == 'object':
+                lbl = preprocessing.LabelEncoder()
+                lbl.fit(list(df[i].values) + list(df[i].values))
+                df[i] = lbl.transform(list(df[i].values))
+        return df
 
     @staticmethod
     def process_dates(df):
