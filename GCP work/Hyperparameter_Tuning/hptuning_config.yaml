@@ -16,22 +16,46 @@
 
 # hyperparam.yaml
 trainingInput:
+  scaleTier: CUSTOM
+  masterType: complex_model_l
+  workerType: complex_model_l
+  workerCount: 1
   hyperparameters:
     goal: MAXIMIZE
-    maxTrials: 1
-    maxParallelTrials: 5
+    maxTrials: 10
+    maxParallelTrials: 1
     hyperparameterMetricTag: my_metric_tag
     enableTrialEarlyStopping: TRUE 
     params:
     - parameterName: max_depth
       type: INTEGER
-      minValue: 3
-      maxValue: 8
+      minValue: 8
+      maxValue: 11
     - parameterName: n_estimators
       type: INTEGER
-      minValue: 50
-      maxValue: 200
+      minValue: 500
+      maxValue: 1500
+    - parameterName: learning_rate
+      type: DOUBLE
+      minValue: 0.03
+      maxValue: 0.5
     - parameterName: booster
       type: CATEGORICAL
       categoricalValues: [
           "gbtree"]
+    - parameterName: bin_or_numerical_class
+      type: CATEGORICAL
+      categoricalValues: [
+          "numerical","binary"]
+    - parameterName: extract_times
+      type: CATEGORICAL
+      categoricalValues: [
+          "true","false"]
+
+#to resume job
+#trainingInput:extract_times
+#  hyperparameters:
+#    #goal: MAXIMIZE
+#    maxTrials: 2
+#    maxParallelTrials: 2
+#    resumePreviousJobId: fraud_detection_hp_tuning_20190918_132014

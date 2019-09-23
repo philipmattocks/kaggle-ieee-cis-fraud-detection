@@ -1,5 +1,7 @@
 import argparse
 import datetime
+from datetime import timedelta
+from datetime import datetime as dt
 import os
 import pandas as pd
 import numpy as np
@@ -14,8 +16,11 @@ from sklearn.externals import joblib
 from random import shuffle
 import re
 from sklearn.model_selection import train_test_split
-identity = 'train_identity_small.csv'
-transaction = 'train_transaction_small.csv'
+from sklearn import metrics
+from sklearn.metrics import recall_score
+import category_encoders as ce
+identity = 'train_identity.csv'
+transaction = 'train_transaction.csv'
 
 BUCKET_ID = 'frauddetectionkagglepkmatt'
 
@@ -49,6 +54,18 @@ parser.add_argument(
     default=0.05,
     type=float
 )
+parser.add_argument(
+    '--bin_or_numerical_class',  # Specified in the config file
+    help='whether to use binary or numerical label encoding for categoricals',
+    default='numerical',
+    type=str
+)
+parser.add_argument(
+    '--extract_times',  # Specified in the config file
+    help='whether to use feature engineer time features',
+    default='true',
+    type=str
+)
 
 args = parser.parse_args()
 #  bucket holding the data
@@ -67,9 +84,9 @@ if not os.path.exists(transaction):
     blob.download_to_filename(transaction)
 
 
-def load_and_merge_data(transaction_csv,identity_csv,isTrain,nrows=1000000):
-    df_transaction = pd.read_csv(transaction_csv, index_col='TransactionID',nrows=nrows)
-    df_identity = pd.read_csv(identity_csv, index_col='TransactionID',nrows=nrows)
+def load_and_merge_data(transaction_csv,identity_csv,isTrain):
+    df_transaction = pd.read_csv(transaction_csv, index_col='TransactionID')
+    df_identity = pd.read_csv(identity_csv, index_col='TransactionID')
     df = pd.merge(df_transaction, df_identity, on='TransactionID', how='left')
     del df_transaction
     del df_identity
@@ -102,15 +119,60 @@ def get_lists_of_numerical_categorical(df,regex):
 cat_columns_regex='ProductCD|card[1-6]|addr\d|\w_emaildomain|M[1-9]|time_|Device\w+|id_12|id_13|id_14|id_15|id_16|id_17|id_18|id_19|id_20|id_21|id_22|id_23|id_24|id_25|id_26|id_27|id_28|id_29|id_30|id_31|id_32|id_33|id_34|id_35|id_36|id_37|id_38'
 numerical,categorical = get_lists_of_numerical_categorical(train,cat_columns_regex)
 
-def numerically_encode_string_categoricals(df):
-    for i in df.columns:
-        if df[i].dtype == 'object':
-            lbl = preprocessing.LabelEncoder()
-            lbl.fit(list(df[i].values) + list(df[i].values))
-            df[i] = lbl.transform(list(df[i].values))
+def process_dates(df):
+    START_DATE = '2017-12-01'
+    startdate = datetime.datetime.strptime(START_DATE, '%Y-%m-%d')
+    df['TransactionDT_converted'] = df['TransactionDT'].apply(lambda x: (startdate + datetime.timedelta(seconds=x)))
+    df['time_year'] = df['TransactionDT_converted'].dt.year
+    df['time_month'] = df['TransactionDT_converted'].dt.month
+    df['time_dow'] = df['TransactionDT_converted'].dt.dayofweek
+    df['time_hour'] = df['TransactionDT_converted'].dt.hour
+    df['time_day'] = df['TransactionDT_converted'].dt.day
+    df = df.drop(columns="TransactionDT_converted")
+    df = df.drop(columns="time_year")
+    df = df.drop(columns="time_month")
+    df = df.drop(columns="time_day")
     return df
-train = numerically_encode_string_categoricals(train)
-#validate = numerically_encode_string_categoricals(validate)
+
+if args.extract_times == 'true':
+    train = process_dates(train)
+
+if args.bin_or_numerical_class == 'numerical':
+    def numerically_encode_string_categoricals(df):
+        for i in df.columns:
+            if df[i].dtype == 'object':
+                lbl = preprocessing.LabelEncoder()
+                lbl.fit(list(df[i].values) + list(df[i].values))
+                df[i] = lbl.transform(list(df[i].values))
+        return df
+    train = numerically_encode_string_categoricals(train)
+    #validate = numerically_encode_string_categoricals(validate)
+    #Impute median for numerical and mode for categorical
+    def impute_cat_and_num(df,numerical,categorical):
+        fill_NaN_numerical = Imputer(missing_values=np.nan, strategy='median',axis=1)
+        fill_NaN_categorical = Imputer(missing_values=np.nan, strategy='most_frequent',axis=1)
+        df[numerical] = fill_NaN_numerical.fit_transform(df[numerical])
+        df[categorical] = fill_NaN_categorical.fit_transform(df[categorical])
+        return df
+    train = impute_cat_and_num(train,numerical,categorical)
+
+else:
+
+    def binary_encode_categoricals(df,categorical):
+        encoder = ce.BinaryEncoder(cols=categorical).fit(df)
+        df = encoder.transform(df)
+        return encoder,df
+    encoder,train = binary_encode_categoricals(train,categorical)
+    
+    
+    #Impute median for numerical and mode for categorical
+    def impute_cat_and_num(df,numerical,categorical):
+        fill_NaN_numerical = Imputer(missing_values=np.nan, strategy='median',axis=1)
+        #fill_NaN_categorical = Imputer(missing_values=np.nan, strategy='most_frequent',axis=1)
+        df[numerical] = fill_NaN_numerical.fit_transform(df[numerical])
+        #df[categorical] = fill_NaN_categorical.fit_transform(df[categorical])
+        return df
+    train = impute_cat_and_num(train,numerical,categorical)
 
 # From kernel https://www.kaggle.com/gemartin/load-data-reduce-memory-usage
 # WARNING! THIS CAN DAMAGE THE DATA 
@@ -154,14 +216,7 @@ def reduce_mem_usage(df):
 
 train = reduce_mem_usage(train)
 
-#Impute median for numerical and mode for categorical
-def impute_cat_and_num(df,numerical,categorical):
-    fill_NaN_numerical = Imputer(missing_values=np.nan, strategy='median',axis=1)
-    fill_NaN_categorical = Imputer(missing_values=np.nan, strategy='most_frequent',axis=1)
-    df[numerical] = fill_NaN_numerical.fit_transform(df[numerical])
-    df[categorical] = fill_NaN_categorical.fit_transform(df[categorical])
-    return df
-train = impute_cat_and_num(train,numerical,categorical)
+
 
 
 X_train, X_test, y_train, y_test = train_test_split(train, labels, test_size=0.2,random_state=42)
@@ -179,12 +234,26 @@ X_train, X_test, y_train, y_test = train_test_split(train, labels, test_size=0.2
 #finally, ensemble xgboost with multiple seeds may reduce variance
 
 
-clf = xgb.XGBClassifier(max_depth=args.max_depth,
-                             n_estimators=args.n_estimators,
-                             booster=args.booster,
-                             nthread=7,
-                             learning_rate=args.learning_rate
-                            )
+# clf = xgb.XGBClassifier(max_depth=args.max_depth,
+#                              n_estimators=args.n_estimators,
+#                              booster=args.booster,
+#                              nthread=7,
+#                              learning_rate=args.learning_rate
+#                             )
+
+clf = xgb.XGBClassifier(
+        nthread=7,
+        #n_estimators=1000,
+        n_estimators=args.n_estimators,
+        max_depth=10,
+        #learning_rate=0.05,
+        subsample=0.9,
+        colsample_bytree=0.9,
+        tree_method='auto',
+        booster=args.booster,
+        random_state = 42,
+        learning_rate=args.learning_rate
+    )
 
 #clf = xgb.XGBClassifier()
 
@@ -193,7 +262,13 @@ clf.fit(X_train, y_train)
 
 
 # Calculate the mean accuracy on the given test data and labels.
-score = clf.score(X_train, y_train)
+#score = clf.score(X_test, y_test)
+
+#calculate the recall score on test data and labels
+#score = metrics.recall_score(y_test, clf.predict(X_test))
+
+#roc score
+score = metrics.roc_auc_score(y_test,clf.predict_proba(X_test)[:,1])
 
 # The default name of the metric is training/hptuning/metric. 
 # We recommend that you assign a custom name. The only functional difference is that 
@@ -202,9 +277,9 @@ score = clf.score(X_train, y_train)
 # https://cloud.google.com/ml-engine/reference/rest/v1/projects.jobs#HyperparameterSpec
 hpt = hypertune.HyperTune()
 hpt.report_hyperparameter_tuning_metric(
-    hyperparameter_metric_tag='my_metric_tag',
-    metric_value=score,
-    global_step=1000)
+   hyperparameter_metric_tag='my_metric_tag',
+   metric_value=score,
+   global_step=1000)
 
 # Export the model to a file
 model_filename = 'model.pkl'
@@ -217,7 +292,6 @@ job_dir =  args.job_dir.replace('gs://', '')  # Remove the 'gs://'
 bucket_id = job_dir.split('/')[0]
 # Get the path
 bucket_path = job_dir[len('{}/'.format(bucket_id)):]  # Example: 'xgboost_job_dir/1'
-print('{}/{}'.format(bucket_path,model_filename))
 # Upload the model to GCS
 bucket = storage.Client().bucket(bucket_id)
 blob = bucket.blob('{}/{}'.format(
