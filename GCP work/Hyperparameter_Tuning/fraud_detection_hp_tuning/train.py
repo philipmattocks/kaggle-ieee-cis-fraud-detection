@@ -216,9 +216,6 @@ def reduce_mem_usage(df):
 
 train = reduce_mem_usage(train)
 
-
-
-
 X_train, X_test, y_train, y_test = train_test_split(train, labels, test_size=0.2,random_state=42)
 
 # Create the regressor, here we will use a Lasso Regressor to demonstrate the use of HP Tuning.
@@ -245,7 +242,7 @@ clf = xgb.XGBClassifier(
         nthread=7,
         #n_estimators=1000,
         n_estimators=args.n_estimators,
-        max_depth=10,
+        max_depth=args.max_depth,
         #learning_rate=0.05,
         subsample=0.9,
         colsample_bytree=0.9,
